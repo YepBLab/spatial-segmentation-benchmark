@@ -1,6 +1,6 @@
 # Spatial Segmentation Benchmark
 
-Private, reproducible evaluation code for comparing instance-segmentation
+Reproducible evaluation code for comparing instance-segmentation
 outputs in spatial transcriptomics. The repository evaluates raster masks and
 selected vector boundary formats against manual instance masks, summarizes
 downstream Xenium reimport utility, classifies common segmentation errors, and
@@ -451,19 +451,19 @@ that the model learned the target annotations, but cannot estimate performance
 on unseen specimens. A generalization claim requires a genuinely independent
 sample or pre-specified held-out regions.
 
-## Private GitHub access
+## Clone the repository
 
-Human collaborators should be added using their individual GitHub usernames.
-Each collaborator then adds their own SSH public key to their GitHub account and
-clones with:
+Clone with SSH:
 
 ```bash
 git clone git@github.com:YepBLab/spatial-segmentation-benchmark.git
 ```
 
-An SSH key alone does not grant repository permission, and private keys must
-never be shared. Read-only deploy keys are intended for machines or automation,
-not as shared human credentials.
+Or clone with HTTPS:
+
+```bash
+git clone https://github.com/YepBLab/spatial-segmentation-benchmark.git
+```
 
 ## Pre-push private-data audit
 
@@ -481,4 +481,4 @@ and format names in documentation are expected; real paths are not.
 
 ## License
 
-Private collaboration use only. See [LICENSE](LICENSE).
+Released under the [MIT License](LICENSE).
