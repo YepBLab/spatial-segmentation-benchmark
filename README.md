@@ -1,14 +1,9 @@
 # Spatial Segmentation Benchmark
 
-Reproducible evaluation code for comparing instance-segmentation
-outputs in spatial transcriptomics. The repository evaluates raster masks and
-selected vector boundary formats against manual instance masks, summarizes
-downstream Xenium reimport utility, classifies common segmentation errors, and
-renders a consistent benchmark report.
-
-> **Code-only repository.** Manual annotations, morphology images, masks,
-> transcripts, H5AD/Zarr files, model weights, Xenium bundles, credentials, and
-> real storage paths are intentionally excluded.
+Reproducible workflows for fine-tuning CPSAM v2 and comparing
+instance-segmentation outputs in spatial transcriptomics. The repository
+provides model training, mask evaluation, error analysis, stratified summaries,
+figures, and benchmark report generation.
 
 ## Scope
 
@@ -76,10 +71,54 @@ run_evaluation_pipeline.sh    full benchmark entry point
 
 ## CPSAM v2 fine-tuning
 
-The training workflow is manifest-driven and supports configurable channel axis,
-hyperparameters, compute device, and an optional held-out validation split. See
-the dedicated [training README](training/README.md) for the input contract,
-execution examples, outputs, and interpretation guidance.
+The fine-tuning workflow is manifest-driven and supports configurable channel
+axis, training parameters, compute device, and an optional held-out validation
+split.
+
+Create a manifest from the provided example:
+
+```bash
+cp config/training_manifest.example.csv /path/to/training_manifest.csv
+```
+
+Each manifest row defines an image/instance-mask pair and its split:
+
+```text
+region,split,image_path,label_path
+region_001,train,/path/to/image_001.tif,/path/to/mask_001.tif
+region_002,validation,/path/to/image_002.tif,/path/to/mask_002.tif
+```
+
+The `split` column is optional; rows default to `train` when it is absent. Images
+must be 3D TIFF arrays with one channel axis and two spatial axes. Labels must be
+registered 2D integer instance masks with `0` as background.
+
+Run the complete fine-tuning workflow with a Cellpose-compatible Python
+environment:
+
+```bash
+export PYTHON_BIN=/path/to/cellpose/bin/python
+
+N_EPOCHS=<selected_epoch_count> \
+LEARNING_RATE=<selected_learning_rate> \
+WEIGHT_DECAY=<selected_weight_decay> \
+bash training/run_training_pipeline.sh \
+  /path/to/training_project \
+  /path/to/training_manifest.csv
+```
+
+The pipeline performs:
+
+1. input validation, label reindexing, and provenance capture;
+2. Cellpose/model/device preflight checks;
+3. CPSAM v2 fine-tuning with optional validation data;
+4. trained-model reload and smoke testing;
+5. training/validation loss-history visualization.
+
+Important outputs include the trained model, `losses.csv`,
+`training_metadata.json`, `final_model_smoke_test.json`, and
+`training_history_dark.png`. See [training/README.md](training/README.md) for all
+configuration variables and output paths.
 
 ## Installation
 
