@@ -1,0 +1,18 @@
+name: spatial-segmentation-benchmark
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - h5py>=3.9
+  - matplotlib>=3.7
+  - numpy>=1.24
+  - pandas>=2.0
+  - pyarrow>=12
+  - pyyaml>=6
+  - scikit-image>=0.21
+  - scipy>=1.10
+  - shapely>=2.0
+  - tifffile>=2023.7.10
+  - pip
+  - pip:
+      - -e .

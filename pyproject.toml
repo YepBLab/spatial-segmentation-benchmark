@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spatial-segmentation-benchmark"
+version = "0.1.0"
+description = "Reproducible instance-segmentation evaluation for spatial transcriptomics"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Yebin Lab"}]
+dependencies = [
+  "h5py>=3.9",
+  "matplotlib>=3.7",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pyarrow>=12",
+  "PyYAML>=6",
+  "scikit-image>=0.21",
+  "scipy>=1.10",
+  "shapely>=2.0",
+  "tifffile>=2023.7.10",
+]
+
+[project.scripts]
+segbench-evaluate = "segbench.cli:evaluate_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,22 @@
+# Each source must use 0 for background and a unique positive integer per cell.
+models:
+  model_a:
+    display: Model A
+    kind: raster_mask
+    accuracy_source: /path/to/private/model_a/full_mask.tif
+    reimport_outs: /path/to/private/model_a/xenium_reimport/outs
+    color: "#4C78A8"
+
+  model_b:
+    display: Model B
+    kind: vector_parquet
+    accuracy_source: /path/to/private/model_b/cell_boundaries.parquet
+    reimport_outs: /path/to/private/model_b/xenium_reimport/outs
+    color: "#F58518"
+
+  model_c:
+    display: Model C
+    kind: proseg_geometry_collection
+    accuracy_source: /path/to/private/model_c/cell_polygons.geojson
+    reimport_outs: /path/to/private/model_c/xenium_reimport/outs
+    color: "#54A24B"

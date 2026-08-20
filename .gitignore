@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+env/
+
+# Local inputs and generated outputs must never be committed.
+data/
+annotations/
+manual_labels/
+results/
+outputs/
+logs/
+*.h5
+*.h5ad
+*.tif
+*.tiff
+*.zarr/
+*.gpkg
+*.parquet
+*.geojson
+
+# Keep only deliberately curated example figures.
+*.png
+!figures/examples/*.png
+
+.DS_Store
+.ipynb_checkpoints/
