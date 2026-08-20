@@ -1,0 +1,3 @@
+region,image_path,label_path
+region_001,/private/path/region_001_img.tif,/private/path/region_001_masks.tif
+region_002,/private/path/region_002_img.tif,/private/path/region_002_masks.tif

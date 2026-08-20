@@ -13,6 +13,15 @@ manual_labels/
 results/
 outputs/
 logs/
+training_data/
+provenance/
+training/final/
+training/logs/
+models/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
 *.h5
 *.h5ad
 *.tif

@@ -15,6 +15,8 @@ renders a consistent benchmark report.
 Included:
 
 - one-reference/one-prediction instance-mask evaluation CLI;
+- CPSAM v2 all-region fine-tuning with no validation split;
+- training preflight, provenance, model smoke test, and loss-history figure;
 - multi-model, multi-region benchmark pipeline;
 - IoU-threshold curves and detection metrics;
 - matched overlap and boundary metrics in physical units;
@@ -27,7 +29,8 @@ Included:
 
 Not included:
 
-- segmentation model training or inference;
+- full-slide model inference, tiled-mask stitching, or full-mask construction;
+- Xenium segmentation reimport code;
 - manual annotation tools or annotation files;
 - private study data;
 - a claim of cross-sample model generalization.
@@ -64,11 +67,27 @@ scripts/
   07_render_benchmark_figures.py
   08_build_benchmark_report.py
   09_validate_benchmark.py
+training/
+  prepare_training_data.py
+  preflight_training.py
+  train_cpsam_v2.py
+  validate_trained_model.py
+  plot_training_history.py
+  run_training_pipeline.sh
 config/                       placeholder configurations only
 tests/                        synthetic-mask regression tests
 docs/DATA_CONTRACT.md         required input formats
 run_evaluation_pipeline.sh    full benchmark entry point
 ```
+
+## CPSAM v2 fine-tuning
+
+The training-only workflow reproduces the final two-channel configuration:
+DAPI from physical channel 0 plus boundary/18S signal from physical channel 2,
+all supplied regions used for training, no validation split, and 100 epochs by
+default. It excludes reimport, stitching, full-mask construction, and source
+annotations. See the dedicated [training README](training/README.md) for the
+manifest contract, exact hyperparameters, O2/GPU execution, outputs, and caveats.
 
 ## Installation
 
