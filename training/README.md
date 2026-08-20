@@ -1,87 +1,60 @@
 # CPSAM v2 fine-tuning workflow
 
-This directory contains only the model-training workflow. It intentionally does
-not contain full-slide inference, tiled-mask stitching, full-mask construction,
-Xenium reimport, annotations, masks, source images, or model weights.
+This directory provides a manifest-driven workflow for fine-tuning CPSAM v2
+with Cellpose 4.2 or newer.
 
-## Reproduced training design
-
-The defaults reproduce the final all-region training configuration:
-
-- base model: `cpsam_v2`;
-- Cellpose: version 4.2 or newer;
-- input tensor: `CYX` with exactly two channels;
-- tensor channel 0: DAPI from physical morphology channel 0;
-- tensor channel 1: boundary/18S signal from physical morphology channel 2;
-- population in the reproduced run: every supplied manual region is used for training;
-- validation split in the reproduced run: none, solely because the available
-  manual-label set is small;
-- epochs: 100;
-- learning rate: `1e-5`;
-- weight decay: `0.1`;
-- batch size: 1;
-- Cellpose patch size (`bsize`): 256;
-- normalization: enabled;
-- rescaling: disabled;
-- random seed: 0.
-
-**Validation remains the recommended design.** With sufficient labels, reserve
-held-out regions or, preferably, held-out specimens for validation. Split at the
-region/specimen level rather than randomly splitting cells from the same image.
-Validation data can support model selection, early stopping, and overfitting
-assessment; an independent external specimen is still preferable for the final
-generalization test.
-
-The reproduced run does not reserve validation data only because the manual-label
-set is limited. Consequently, training loss and metrics calculated on those same
-regions are optimization/in-sample diagnostics. They cannot estimate validation
-performance or performance on unseen specimens.
-
-## Input contract
+## Input manifest
 
 Create a private CSV based on
 [`config/training_manifest.example.csv`](../config/training_manifest.example.csv):
 
 ```text
-region,image_path,label_path
-region_001,/private/path/region_001_img.tif,/private/path/region_001_masks.tif
+region,split,image_path,label_path
+region_001,train,/private/path/region_001_img.tif,/private/path/region_001_masks.tif
+region_002,validation,/private/path/region_002_img.tif,/private/path/region_002_masks.tif
 ```
 
-Paths may be absolute or relative to the manifest location. Do not put the
-populated manifest in the Git repository.
+`split` accepts `train` or `validation`. The column is optional; if omitted, all
+rows are assigned to training. Paths may be absolute or relative to the manifest
+location. Keep the populated manifest outside the Git repository.
 
-Each image must be a two-channel `CYX` TIFF. Each label must be a registered 2D
-integer instance mask with `0` as background and one positive ID per cell. The
-preparation step copies the image, reindexes a derived label mask consecutively,
+Each image must be a 3D TIFF with one channel axis and two spatial axes. The
+channel axis is configurable and defaults to axis 0. Each label must be a
+registered 2D integer instance mask with `0` as background and one positive ID
+per object.
+
+The preparation step copies the image, reindexes a derived label consecutively,
 records SHA-256 hashes, and never modifies the source label.
 
-## O2/GPU execution
+## Validation design
 
-Start an interactive or scheduled GPU job first; do not run training on a login
-node. Load the compiler/CUDA modules required by the local Cellpose environment,
-then point `PYTHON_BIN` at that environment:
+Use independent regions or specimens for validation whenever the dataset allows
+it. Define the split in the manifest rather than randomly dividing objects from
+the same image. If the manifest contains no validation rows, training proceeds
+without validation and records that policy in its metadata.
+
+Validation loss from `cellpose.train.train_seg` is preserved when the installed
+Cellpose version returns it. Final performance claims should use the separate
+instance-segmentation evaluation workflow and an appropriate independent test
+set.
+
+## Execution
+
+Run the workflow on a compute node with a compatible Cellpose environment. Point
+`PYTHON_BIN` at that environment. Set `N_EPOCHS`, `LEARNING_RATE`, and
+`WEIGHT_DECAY` explicitly to the values selected for the experiment, then run:
 
 ```bash
-module load gcc/14.2.0 cuda/12.8
-export PYTHON_BIN=/path/to/cellpose42/bin/python
+export PYTHON_BIN=/path/to/cellpose/bin/python
 
 bash training/run_training_pipeline.sh \
   /private/path/training_project \
   /private/path/training_manifest.csv
 ```
 
-The runner requires CUDA. Environment variables can override the defaults:
-
-```bash
-MODEL_NAME=my_cpsam_v2_model \
-N_EPOCHS=100 \
-LEARNING_RATE=1e-5 \
-WEIGHT_DECAY=0.1 \
-BATCH_SIZE=1 \
-BSIZE=256 \
-SMOOTH_WINDOW=9 \
-bash training/run_training_pipeline.sh PROJECT_ROOT TRAINING_MANIFEST
-```
+The runner uses CUDA by default. Other configurable variables include
+`PRETRAINED_MODEL`, `MODEL_NAME`, `DEVICE`, `BATCH_SIZE`, `BSIZE`,
+`CHANNEL_AXIS`, and `SMOOTH_WINDOW`.
 
 Set `OVERWRITE_PREPARED_DATA=1` only after reviewing an existing frozen training
 dataset. The default refuses to overwrite derived pairs.
@@ -89,31 +62,28 @@ dataset. The default refuses to overwrite derived pairs.
 ## Stages
 
 1. `prepare_training_data.py`
-   - validates image/label registration and channel order;
-   - requires at least five instances per region by default;
-   - creates derived training pairs and provenance hashes.
+   - validates image/label registration and manifest splits;
+   - creates derived training/validation pairs and provenance hashes.
 2. `preflight_training.py`
-   - checks Cellpose version, `cpsam_v2`, CUDA, all pairs, and one pilot inference.
+   - checks Cellpose, the requested model, device availability, data pairs, and
+     one pilot inference.
 3. `train_cpsam_v2.py`
-   - loads every prepared region;
-   - for this limited-label reproduction, calls `cellpose.train.train_seg` with
-     `test_data=None` and `test_labels=None`;
-   - saves the trained model, loss history, and full hyperparameter metadata.
+   - loads the prepared training and optional validation regions;
+   - saves the model, available loss histories, and hyperparameter metadata.
 4. `validate_trained_model.py`
-   - reloads the final model;
-   - runs one in-memory inference to confirm shape and non-empty output;
-   - does not save an inference mask.
+   - reloads the final model and runs one in-memory smoke test.
 5. `plot_training_history.py`
-   - creates a dark-theme raw/smoothed loss plot and per-epoch loss-change panel;
-   - contains training-process diagnostics only, not accuracy results.
+   - renders a dark-theme training-history figure.
 
 ## Outputs
 
-All outputs are written under the private `PROJECT_ROOT`:
+All outputs are written under `PROJECT_ROOT`:
 
 ```text
-training_data/all/*_img.tif
-training_data/all/*_masks.tif
+training_data/train/*_img.tif
+training_data/train/*_masks.tif
+training_data/validation/*_img.tif
+training_data/validation/*_masks.tif
 training_data/label_maps/*.csv
 training_data/training_manifest.csv
 training_data/training_data_summary.json
@@ -126,6 +96,5 @@ training/final/training_history_dark.png
 logs/*.log
 ```
 
-These outputs, especially source-derived masks and model weights, must remain
-outside the repository. The repository `.gitignore` includes defensive patterns,
-but users must still inspect `git status` before every push.
+Inspect `git status` before every push to ensure generated data and model files
+remain outside version control.

@@ -15,8 +15,7 @@ renders a consistent benchmark report.
 Included:
 
 - one-reference/one-prediction instance-mask evaluation CLI;
-- CPSAM v2 fine-tuning; the current small-label configuration uses all regions
-  and therefore does not reserve a validation split;
+- configurable CPSAM v2 fine-tuning with optional held-out validation data;
 - training preflight, provenance, model smoke test, and loss-history figure;
 - multi-model, multi-region benchmark pipeline;
 - IoU-threshold curves and detection metrics;
@@ -28,13 +27,7 @@ Included:
 - bootstrap confidence intervals, figures, report generation, and validation;
 - synthetic regression tests.
 
-Not included:
-
-- full-slide model inference, tiled-mask stitching, or full-mask construction;
-- Xenium segmentation reimport code;
-- manual annotation tools or annotation files;
-- private study data;
-- a claim of cross-sample model generalization.
+Not included: private study data or annotation files.
 
 ## Example outputs
 
@@ -83,15 +76,10 @@ run_evaluation_pipeline.sh    full benchmark entry point
 
 ## CPSAM v2 fine-tuning
 
-The training-only workflow reproduces the final two-channel configuration:
-DAPI from physical channel 0 plus boundary/18S signal from physical channel 2
-and 100 epochs by default. A held-out validation split is recommended when
-sufficient independent manual labels are available. The reproduced run uses
-all supplied regions only because the manual-label set is small, so its training
-loss and same-region metrics are in-sample diagnostics. The workflow excludes
-reimport, stitching, full-mask construction, and source annotations. See the
-dedicated [training README](training/README.md) for the manifest contract, exact
-hyperparameters, O2/GPU execution, outputs, and caveats.
+The training workflow is manifest-driven and supports configurable channel axis,
+hyperparameters, compute device, and an optional held-out validation split. See
+the dedicated [training README](training/README.md) for the input contract,
+execution examples, outputs, and interpretation guidance.
 
 ## Installation
 

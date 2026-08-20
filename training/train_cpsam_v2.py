@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fine-tune CPSAM v2 on all prepared regions when labels are too limited to hold out."""
+"""Fine-tune CPSAM v2 with optional manifest-defined validation data."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import json
 import os
 import socket
 import time
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -23,20 +22,26 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--pretrained-model", default="cpsam_v2")
-    parser.add_argument("--model-name", default="cpsam_v2_finetuned_all_regions")
+    parser.add_argument("--model-name", default="cpsam_v2_finetuned")
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
-    parser.add_argument("--n-epochs", type=int, default=100)
-    parser.add_argument("--learning-rate", type=float, default=1e-5)
-    parser.add_argument("--weight-decay", type=float, default=0.1)
+    parser.add_argument("--n-epochs", type=int, required=True)
+    parser.add_argument("--learning-rate", type=float, required=True)
+    parser.add_argument("--weight-decay", type=float, required=True)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--bsize", type=int, default=256)
-    parser.add_argument("--save-every", type=int, default=100)
+    parser.add_argument("--save-every", type=int)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--min-train-masks", type=int, default=5)
+    parser.add_argument("--channel-axis", type=int, default=0)
     return parser.parse_args()
 
 
-def load_all_pairs(directory: Path) -> tuple[list[np.ndarray], list[np.ndarray], list[str]]:
+def load_pairs(
+    directory: Path,
+    *,
+    channel_axis: int,
+    allow_empty: bool = False,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[str]]:
     images: list[np.ndarray] = []
     masks: list[np.ndarray] = []
     regions: list[str] = []
@@ -47,13 +52,19 @@ def load_all_pairs(directory: Path) -> tuple[list[np.ndarray], list[np.ndarray],
             raise FileNotFoundError(mask_path)
         image = tifffile.imread(image_path)
         mask = np.asarray(tifffile.imread(mask_path)).squeeze()
-        if image.ndim != 3 or image.shape[0] != 2 or image.shape[1:] != mask.shape:
+        if image.ndim != 3 or not -image.ndim <= channel_axis < image.ndim:
+            raise ValueError(f"Invalid image {image_path}: shape={image.shape}")
+        axis = channel_axis % image.ndim
+        spatial_shape = tuple(
+            int(size) for index, size in enumerate(image.shape) if index != axis
+        )
+        if spatial_shape != mask.shape:
             raise ValueError(f"Invalid pair {image_path}: {image.shape} / {mask.shape}")
         images.append(image)
         masks.append(mask)
         regions.append(region)
-    if not images:
-        raise RuntimeError(f"No prepared training pairs found in {directory}")
+    if not images and not allow_empty:
+        raise RuntimeError(f"No prepared pairs found in {directory}")
     return images, masks, regions
 
 
@@ -68,11 +79,14 @@ def main() -> int:
         raise RuntimeError("--device cuda requested but torch.cuda.is_available() is false")
 
     project = args.project_root.resolve()
-    images, masks, regions = load_all_pairs(project / "training_data" / "all")
-    warnings.warn(
-        "No validation split is used because this reproduction assumes a limited manual-label "
-        "set. With sufficient labels, hold out independent regions or specimens.",
-        stacklevel=1,
+    images, masks, regions = load_pairs(
+        project / "training_data" / "train",
+        channel_axis=args.channel_axis,
+    )
+    validation_images, validation_masks, validation_regions = load_pairs(
+        project / "training_data" / "validation",
+        channel_axis=args.channel_axis,
+        allow_empty=True,
     )
     output_dir = project / "training" / "final"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,13 +98,13 @@ def main() -> int:
         torch.cuda.manual_seed_all(args.seed)
     started = time.time()
     model = models.CellposeModel(gpu=use_gpu, pretrained_model=args.pretrained_model)
-    model_path, train_losses, _ = train.train_seg(
+    model_path, train_losses, validation_losses = train.train_seg(
         model.net,
         train_data=images,
         train_labels=masks,
-        test_data=None,
-        test_labels=None,
-        channel_axis=0,
+        test_data=validation_images or None,
+        test_labels=validation_masks or None,
+        channel_axis=args.channel_axis,
         load_files=False,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
@@ -99,7 +113,7 @@ def main() -> int:
         normalize=True,
         compute_flows=False,
         save_path=output_dir,
-        save_every=args.save_every,
+        save_every=args.save_every or args.n_epochs,
         save_each=False,
         rescale=False,
         bsize=args.bsize,
@@ -110,19 +124,35 @@ def main() -> int:
     if train_losses.size == 0 or not np.isfinite(train_losses).all():
         raise RuntimeError("Training loss is empty or contains non-finite values")
 
+    raw_validation_losses = np.asarray(
+        [] if validation_losses is None else validation_losses,
+        dtype=float,
+    )
+    if raw_validation_losses.size and not np.isfinite(raw_validation_losses).all():
+        raise RuntimeError("Validation loss contains non-finite values")
+    validation_losses = (
+        np.where(raw_validation_losses > 0, raw_validation_losses, np.nan)
+        if validation_regions
+        else np.asarray([], dtype=float)
+    )
+
     losses_path = output_dir / "losses.csv"
     with losses_path.open("w", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["epoch", "train_loss"])
+        writer.writerow(["epoch", "train_loss", "validation_loss"])
         for index, value in enumerate(train_losses, start=1):
-            writer.writerow([index, f"{float(value):.10g}"])
+            validation_value = (
+                f"{float(validation_losses[index - 1]):.10g}"
+                if index <= validation_losses.size
+                and np.isfinite(validation_losses[index - 1])
+                else ""
+            )
+            writer.writerow([index, f"{float(value):.10g}", validation_value])
 
     metadata = {
         "status": "PASS",
-        "training_scope": "all_regions_training_due_to_limited_manual_labels",
-        "validation_policy": "none_due_to_limited_manual_labels",
-        "recommended_validation_policy": (
-            "hold out independent regions or specimens when sufficient labels are available"
+        "validation_policy": (
+            "held_out_manifest_split" if validation_regions else "no_validation_split"
         ),
         "host": socket.gethostname(),
         "python": os.sys.executable,
@@ -134,13 +164,16 @@ def main() -> int:
         "model_path": str(model_path),
         "model_name": args.model_name,
         "train_regions": regions,
-        "validation_regions": [],
+        "validation_regions": validation_regions,
         "n_epochs_requested": args.n_epochs,
         "loss_rows_returned": int(train_losses.size),
+        "validation_loss_rows_returned": int(np.isfinite(validation_losses).sum()),
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
         "batch_size": args.batch_size,
         "bsize": args.bsize,
+        "save_every": args.save_every or args.n_epochs,
+        "channel_axis": args.channel_axis,
         "normalize": True,
         "rescale": False,
         "seed": args.seed,

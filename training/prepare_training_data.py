@@ -16,6 +16,7 @@ import tifffile
 
 
 REQUIRED_COLUMNS = {"region", "image_path", "label_path"}
+VALID_SPLITS = {"train", "validation"}
 
 
 def sha256(path: Path, block_size: int = 8 * 1024 * 1024) -> str:
@@ -47,6 +48,15 @@ def relabel_consecutive(mask: np.ndarray) -> tuple[np.ndarray, list[tuple[int, i
     return output, mapping
 
 
+def spatial_shape(image: np.ndarray, channel_axis: int) -> tuple[int, int]:
+    if image.ndim != 3:
+        raise ValueError(f"Expected a 3D image, got {image.shape}")
+    if not -image.ndim <= channel_axis < image.ndim:
+        raise ValueError(f"Channel axis {channel_axis} is invalid for shape {image.shape}")
+    axis = channel_axis % image.ndim
+    return tuple(int(size) for index, size in enumerate(image.shape) if index != axis)
+
+
 def atomic_tiff(path: Path, array: np.ndarray) -> None:
     temporary = path.with_name(path.name + ".part")
     tifffile.imwrite(
@@ -74,6 +84,15 @@ def read_manifest(path: Path) -> list[dict[str, str]]:
         raise ValueError("Every manifest row must have a non-empty region")
     if len(regions) != len(set(regions)):
         raise ValueError("Training manifest region values must be unique")
+    for row in rows:
+        split = row.get("split", "train").strip().lower() or "train"
+        if split not in VALID_SPLITS:
+            raise ValueError(
+                f"{row['region']}: split must be one of {sorted(VALID_SPLITS)}, got {split!r}"
+            )
+        row["split"] = split
+    if not any(row["split"] == "train" for row in rows):
+        raise ValueError("Training manifest must contain at least one train row")
     return rows
 
 
@@ -81,6 +100,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--channel-axis", type=int, default=0)
     parser.add_argument("--min-masks", type=int, default=5)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -92,15 +112,16 @@ def main() -> int:
     manifest_path = args.manifest.resolve()
     source_rows = read_manifest(manifest_path)
     output_root = project / "training_data"
-    pair_dir = output_root / "all"
     mapping_dir = output_root / "label_maps"
-    pair_dir.mkdir(parents=True, exist_ok=True)
+    for split in sorted(VALID_SPLITS):
+        (output_root / split).mkdir(parents=True, exist_ok=True)
     mapping_dir.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, object]] = []
     total_instances = 0
     for source in source_rows:
         region = source["region"].strip()
+        split = source["split"]
         image_path = resolve_path(source["image_path"], manifest_path.parent)
         label_path = resolve_path(source["label_path"], manifest_path.parent)
         if not image_path.is_file():
@@ -110,9 +131,8 @@ def main() -> int:
 
         image = tifffile.imread(image_path)
         label = np.asarray(tifffile.imread(label_path)).squeeze()
-        if image.ndim != 3 or image.shape[0] != 2:
-            raise ValueError(f"{region}: expected CYX=(2,Y,X), got {image.shape}")
-        if label.ndim != 2 or tuple(image.shape[1:]) != tuple(label.shape):
+        image_spatial_shape = spatial_shape(image, args.channel_axis)
+        if label.ndim != 2 or image_spatial_shape != tuple(label.shape):
             raise ValueError(f"{region}: image/label mismatch {image.shape} versus {label.shape}")
         if not np.issubdtype(label.dtype, np.integer) or np.any(label < 0):
             raise ValueError(f"{region}: label must contain non-negative integer instance IDs")
@@ -124,6 +144,7 @@ def main() -> int:
             )
         total_instances += len(mapping)
 
+        pair_dir = output_root / split
         image_out = pair_dir / f"{region}_img.tif"
         label_out = pair_dir / f"{region}_masks.tif"
         if (image_out.exists() or label_out.exists()) and not args.overwrite:
@@ -144,7 +165,7 @@ def main() -> int:
         rows.append(
             {
                 "region": region,
-                "split": "train",
+                "split": split,
                 "source_image": str(image_path),
                 "source_label": str(label_path),
                 "source_image_sha256": sha256(image_path),
@@ -163,7 +184,10 @@ def main() -> int:
                 "label_map": str(map_path),
             }
         )
-        print(f"{region}: shape={label.shape}, instances={len(mapping)}", flush=True)
+        print(
+            f"{region}: split={split}, shape={label.shape}, instances={len(mapping)}",
+            flush=True,
+        )
 
     frozen_manifest = output_root / "training_manifest.csv"
     temporary_manifest = frozen_manifest.with_name(frozen_manifest.name + ".part")
@@ -175,19 +199,17 @@ def main() -> int:
 
     summary = {
         "status": "PASS",
-        "training_scope": "all_regions_training_due_to_limited_manual_labels",
-        "validation_policy": "none_due_to_limited_manual_labels",
-        "recommended_validation_policy": (
-            "hold out independent regions or specimens when sufficient labels are available"
+        "validation_policy": (
+            "held_out_manifest_split"
+            if any(row["split"] == "validation" for row in rows)
+            else "no_validation_split"
         ),
-        "channel_contract": {
-            "array_axis": "CYX",
-            "channel_0": "DAPI; physical morphology channel 0",
-            "channel_1": "boundary/18S signal; physical morphology channel 2",
-        },
+        "channel_axis": args.channel_axis,
         "regions": len(rows),
-        "train_regions": [str(row["region"]) for row in rows],
-        "validation_regions": [],
+        "train_regions": [str(row["region"]) for row in rows if row["split"] == "train"],
+        "validation_regions": [
+            str(row["region"]) for row in rows if row["split"] == "validation"
+        ],
         "total_instances": total_instances,
         "source_labels_modified": False,
         "derived_labels_reindexed_only": True,

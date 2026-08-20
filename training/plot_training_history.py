@@ -41,6 +41,17 @@ def main() -> int:
         .mean()
         .to_numpy()
     )
+    validation = (
+        pd.to_numeric(table["validation_loss"], errors="coerce").to_numpy(dtype=float)
+        if "validation_loss" in table
+        else np.full(loss.shape, np.nan)
+    )
+    validation_smooth = (
+        pd.Series(validation)
+        .ewm(span=args.smooth_window, adjust=False, min_periods=1)
+        .mean()
+        .to_numpy()
+    )
     delta = np.diff(loss, prepend=np.nan)
     delta_smooth = (
         pd.Series(delta)
@@ -56,6 +67,7 @@ def main() -> int:
     grid = "#26384A"
     cyan = "#40E0D0"
     orange = "#FFB347"
+    highlight = "#FFFFFF"
     plt.rcParams.update(
         {
             "figure.facecolor": background,
@@ -85,14 +97,32 @@ def main() -> int:
         linewidth=2.7,
         label=f"EWMA (span={args.smooth_window})",
     )
-    axes[0].scatter(epoch[-1], smooth[-1], color=orange, s=42, zorder=3)
+    validation_available = np.isfinite(validation)
+    if validation_available.any():
+        axes[0].plot(
+            epoch[validation_available],
+            validation[validation_available],
+            color=orange,
+            linewidth=1.0,
+            alpha=0.35,
+            label="Raw validation loss",
+        )
+        smooth_available = np.isfinite(validation_smooth)
+        axes[0].plot(
+            epoch[smooth_available],
+            validation_smooth[smooth_available],
+            color=orange,
+            linewidth=2.2,
+            label="Validation loss EWMA",
+        )
+    axes[0].scatter(epoch[-1], smooth[-1], color=highlight, s=42, zorder=3)
     axes[0].annotate(
         f"final {loss[-1]:.4g}",
         (epoch[-1], smooth[-1]),
         xytext=(-8, 12),
         textcoords="offset points",
         ha="right",
-        color=orange,
+        color=highlight,
         fontsize=10,
     )
     axes[0].set_ylabel("Training loss")

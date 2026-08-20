@@ -10,10 +10,13 @@ PROJECT_ROOT="$(mkdir -p "$1" && cd "$1" && pwd)"
 MANIFEST="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python}"
-MODEL_NAME="${MODEL_NAME:-cpsam_v2_finetuned_all_regions}"
-N_EPOCHS="${N_EPOCHS:-100}"
-LEARNING_RATE="${LEARNING_RATE:-1e-5}"
-WEIGHT_DECAY="${WEIGHT_DECAY:-0.1}"
+PRETRAINED_MODEL="${PRETRAINED_MODEL:-cpsam_v2}"
+MODEL_NAME="${MODEL_NAME:-cpsam_v2_finetuned}"
+DEVICE="${DEVICE:-cuda}"
+CHANNEL_AXIS="${CHANNEL_AXIS:-0}"
+N_EPOCHS="${N_EPOCHS:?Set N_EPOCHS before running the training pipeline}"
+LEARNING_RATE="${LEARNING_RATE:?Set LEARNING_RATE before running the training pipeline}"
+WEIGHT_DECAY="${WEIGHT_DECAY:?Set WEIGHT_DECAY before running the training pipeline}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 BSIZE="${BSIZE:-256}"
 SMOOTH_WINDOW="${SMOOTH_WINDOW:-9}"
@@ -32,6 +35,7 @@ run_step() {
 PREPARE_ARGS=(
   --project-root "${PROJECT_ROOT}"
   --manifest "${MANIFEST}"
+  --channel-axis "${CHANNEL_AXIS}"
 )
 if [[ "${OVERWRITE_PREPARED_DATA:-0}" == "1" ]]; then
   PREPARE_ARGS+=(--overwrite)
@@ -40,33 +44,38 @@ fi
 run_step 01_prepare_training_data \
   "${PYTHON_BIN}" "${SCRIPT_DIR}/prepare_training_data.py" "${PREPARE_ARGS[@]}"
 
-run_step 02_preflight \
-  "${PYTHON_BIN}" "${SCRIPT_DIR}/preflight_training.py" \
-  --project-root "${PROJECT_ROOT}" \
-  --pretrained-model cpsam_v2 \
-  --require-cuda
+PREFLIGHT_ARGS=(
+  --project-root "${PROJECT_ROOT}"
+  --pretrained-model "${PRETRAINED_MODEL}"
+  --channel-axis "${CHANNEL_AXIS}"
+)
+if [[ "${DEVICE}" == "cuda" ]]; then
+  PREFLIGHT_ARGS+=(--require-cuda)
+fi
 
-echo "NOTICE: this reproduction uses all regions because manual labels are limited."
-echo "With sufficient labels, reserve independent regions/specimens for validation."
+run_step 02_preflight \
+  "${PYTHON_BIN}" "${SCRIPT_DIR}/preflight_training.py" "${PREFLIGHT_ARGS[@]}"
 
 run_step 03_train \
   "${PYTHON_BIN}" "${SCRIPT_DIR}/train_cpsam_v2.py" \
   --project-root "${PROJECT_ROOT}" \
-  --pretrained-model cpsam_v2 \
+  --pretrained-model "${PRETRAINED_MODEL}" \
   --model-name "${MODEL_NAME}" \
-  --device cuda \
+  --device "${DEVICE}" \
   --n-epochs "${N_EPOCHS}" \
   --learning-rate "${LEARNING_RATE}" \
   --weight-decay "${WEIGHT_DECAY}" \
   --batch-size "${BATCH_SIZE}" \
-  --bsize "${BSIZE}"
+  --bsize "${BSIZE}" \
+  --channel-axis "${CHANNEL_AXIS}"
 
 run_step 04_validate_model \
   "${PYTHON_BIN}" "${SCRIPT_DIR}/validate_trained_model.py" \
   --project-root "${PROJECT_ROOT}" \
-  --device cuda \
+  --device "${DEVICE}" \
   --batch-size "${BATCH_SIZE}" \
-  --bsize "${BSIZE}"
+  --bsize "${BSIZE}" \
+  --channel-axis "${CHANNEL_AXIS}"
 
 run_step 05_plot_training_history \
   "${PYTHON_BIN}" "${SCRIPT_DIR}/plot_training_history.py" \

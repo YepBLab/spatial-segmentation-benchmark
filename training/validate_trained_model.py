@@ -34,22 +34,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--flow-threshold", type=float, default=0.4)
     parser.add_argument("--cellprob-threshold", type=float, default=0.0)
     parser.add_argument("--min-size", type=int, default=15)
+    parser.add_argument("--channel-axis", type=int)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     project = args.project_root.resolve()
+    metadata: dict[str, object] = {}
     if args.model_path is None:
         metadata_path = project / "training" / "final" / "training_metadata.json"
         metadata = json.loads(metadata_path.read_text())
         model_path = Path(metadata["model_path"]).expanduser().resolve()
     else:
         model_path = args.model_path.expanduser().resolve()
+    channel_axis = (
+        args.channel_axis
+        if args.channel_axis is not None
+        else int(metadata.get("channel_axis", 0))
+    )
     if not model_path.is_file():
         raise FileNotFoundError(model_path)
 
-    train_dir = project / "training_data" / "all"
+    train_dir = project / "training_data" / "train"
     image_paths = sorted(train_dir.glob("*_img.tif"))
     if not image_paths:
         raise RuntimeError(f"No prepared training images found in {train_dir}")
@@ -72,7 +79,7 @@ def main() -> int:
     prediction = np.asarray(
         model.eval(
             image,
-            channel_axis=0,
+            channel_axis=channel_axis,
             batch_size=args.batch_size,
             bsize=args.bsize,
             diameter=None,
@@ -95,6 +102,7 @@ def main() -> int:
         "gpu": torch.cuda.get_device_name(0) if use_gpu else None,
         "pilot_region": region,
         "pilot_shape_yx": list(truth.shape),
+        "channel_axis": channel_axis,
         "pilot_instances": predicted_instances,
         "prediction_saved": False,
         "elapsed_seconds": time.time() - started,

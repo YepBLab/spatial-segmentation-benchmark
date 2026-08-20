@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the Cellpose/CPSAM v2, device, and two-channel training-data contracts."""
+"""Verify the Cellpose model, device, and prepared training-data contracts."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pretrained-model", default="cpsam_v2")
     parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--min-masks", type=int, default=5)
+    parser.add_argument("--channel-axis", type=int, default=0)
     return parser.parse_args()
 
 
@@ -41,45 +42,60 @@ def main() -> int:
     if args.require_cuda and not torch.cuda.is_available():
         raise RuntimeError("CUDA is required but torch.cuda.is_available() is false")
 
-    train_dir = project / "training_data" / "all"
+    train_dir = project / "training_data" / "train"
     image_paths = sorted(train_dir.glob("*_img.tif"))
     if not image_paths:
         raise RuntimeError(f"No prepared training images found in {train_dir}")
     pair_rows: list[dict[str, object]] = []
-    for image_path in image_paths:
-        region = image_path.name.removesuffix("_img.tif")
-        mask_path = train_dir / f"{region}_masks.tif"
-        if not mask_path.is_file():
-            raise FileNotFoundError(mask_path)
-        image = tifffile.imread(image_path)
-        mask = np.asarray(tifffile.imread(mask_path)).squeeze()
-        if image.ndim != 3 or image.shape[0] != 2 or image.shape[1:] != mask.shape:
-            raise RuntimeError(f"{region}: incompatible shapes {image.shape} / {mask.shape}")
-        instance_count = int(np.unique(mask[mask > 0]).size)
-        if instance_count < args.min_masks:
-            raise RuntimeError(
-                f"{region}: found {instance_count} instances; minimum is {args.min_masks}"
+    for split in ("train", "validation"):
+        directory = project / "training_data" / split
+        for image_path in sorted(directory.glob("*_img.tif")):
+            region = image_path.name.removesuffix("_img.tif")
+            mask_path = directory / f"{region}_masks.tif"
+            if not mask_path.is_file():
+                raise FileNotFoundError(mask_path)
+            image = tifffile.imread(image_path)
+            mask = np.asarray(tifffile.imread(mask_path)).squeeze()
+            if image.ndim != 3:
+                raise RuntimeError(f"{region}: expected a 3D image, got {image.shape}")
+            if not -image.ndim <= args.channel_axis < image.ndim:
+                raise RuntimeError(
+                    f"{region}: channel axis {args.channel_axis} is invalid for {image.shape}"
+                )
+            axis = args.channel_axis % image.ndim
+            spatial_shape = tuple(
+                int(size) for index, size in enumerate(image.shape) if index != axis
             )
-        pair_rows.append(
-            {
-                "region": region,
-                "image_shape_cyx": list(image.shape),
-                "mask_shape_yx": list(mask.shape),
-                "instances": instance_count,
-            }
-        )
+            if spatial_shape != mask.shape:
+                raise RuntimeError(f"{region}: incompatible shapes {image.shape} / {mask.shape}")
+            instance_count = int(np.unique(mask[mask > 0]).size)
+            if instance_count < args.min_masks:
+                raise RuntimeError(
+                    f"{region}: found {instance_count} instances; minimum is {args.min_masks}"
+                )
+            pair_rows.append(
+                {
+                    "region": region,
+                    "split": split,
+                    "image_shape": list(image.shape),
+                    "mask_shape_yx": list(mask.shape),
+                    "instances": instance_count,
+                }
+            )
 
     pilot_image_path = image_paths[0]
     pilot_region = pilot_image_path.name.removesuffix("_img.tif")
     pilot_image = tifffile.imread(pilot_image_path)
-    pilot_mask = tifffile.imread(train_dir / f"{pilot_region}_masks.tif")
+    pilot_mask = np.asarray(
+        tifffile.imread(train_dir / f"{pilot_region}_masks.tif")
+    ).squeeze()
     use_gpu = bool(torch.cuda.is_available())
     started = time.time()
     model = models.CellposeModel(gpu=use_gpu, pretrained_model=args.pretrained_model)
     prediction = np.asarray(
         model.eval(
             pilot_image,
-            channel_axis=0,
+            channel_axis=args.channel_axis,
             batch_size=1,
             bsize=256,
             diameter=None,
@@ -104,7 +120,9 @@ def main() -> int:
         "cuda_runtime": torch.version.cuda,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "pretrained_model": args.pretrained_model,
-        "training_regions": len(pair_rows),
+        "channel_axis": args.channel_axis,
+        "training_regions": sum(row["split"] == "train" for row in pair_rows),
+        "validation_regions": sum(row["split"] == "validation" for row in pair_rows),
         "pairs": pair_rows,
         "pilot_region": pilot_region,
         "pilot_prediction_instances": int(np.unique(prediction[prediction > 0]).size),
