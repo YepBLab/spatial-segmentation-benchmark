@@ -46,6 +46,9 @@ run_step 02_preflight \
   --pretrained-model cpsam_v2 \
   --require-cuda
 
+echo "NOTICE: this reproduction uses all regions because manual labels are limited."
+echo "With sufficient labels, reserve independent regions/specimens for validation."
+
 run_step 03_train \
   "${PYTHON_BIN}" "${SCRIPT_DIR}/train_cpsam_v2.py" \
   --project-root "${PROJECT_ROOT}" \

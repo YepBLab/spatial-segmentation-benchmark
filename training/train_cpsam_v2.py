@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fine-tune CPSAM v2 on every prepared region, with no validation split."""
+"""Fine-tune CPSAM v2 on all prepared regions when labels are too limited to hold out."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import json
 import os
 import socket
 import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,11 @@ def main() -> int:
 
     project = args.project_root.resolve()
     images, masks, regions = load_all_pairs(project / "training_data" / "all")
+    warnings.warn(
+        "No validation split is used because this reproduction assumes a limited manual-label "
+        "set. With sufficient labels, hold out independent regions or specimens.",
+        stacklevel=1,
+    )
     output_dir = project / "training" / "final"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -113,7 +119,11 @@ def main() -> int:
 
     metadata = {
         "status": "PASS",
-        "training_scope": "all_regions_no_validation",
+        "training_scope": "all_regions_training_due_to_limited_manual_labels",
+        "validation_policy": "none_due_to_limited_manual_labels",
+        "recommended_validation_policy": (
+            "hold out independent regions or specimens when sufficient labels are available"
+        ),
         "host": socket.gethostname(),
         "python": os.sys.executable,
         "cellpose": importlib.metadata.version("cellpose"),

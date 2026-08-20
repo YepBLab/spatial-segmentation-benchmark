@@ -13,8 +13,9 @@ The defaults reproduce the final all-region training configuration:
 - input tensor: `CYX` with exactly two channels;
 - tensor channel 0: DAPI from physical morphology channel 0;
 - tensor channel 1: boundary/18S signal from physical morphology channel 2;
-- population: every supplied manual region is used for training;
-- validation split: none;
+- population in the reproduced run: every supplied manual region is used for training;
+- validation split in the reproduced run: none, solely because the available
+  manual-label set is small;
 - epochs: 100;
 - learning rate: `1e-5`;
 - weight decay: `0.1`;
@@ -24,9 +25,17 @@ The defaults reproduce the final all-region training configuration:
 - rescaling: disabled;
 - random seed: 0.
 
-Using all regions is deliberate for fitting the supplied annotation convention.
-Metrics calculated on these same regions are in-sample diagnostics and must not
-be presented as evidence of generalization.
+**Validation remains the recommended design.** With sufficient labels, reserve
+held-out regions or, preferably, held-out specimens for validation. Split at the
+region/specimen level rather than randomly splitting cells from the same image.
+Validation data can support model selection, early stopping, and overfitting
+assessment; an independent external specimen is still preferable for the final
+generalization test.
+
+The reproduced run does not reserve validation data only because the manual-label
+set is limited. Consequently, training loss and metrics calculated on those same
+regions are optimization/in-sample diagnostics. They cannot estimate validation
+performance or performance on unseen specimens.
 
 ## Input contract
 
@@ -87,7 +96,8 @@ dataset. The default refuses to overwrite derived pairs.
    - checks Cellpose version, `cpsam_v2`, CUDA, all pairs, and one pilot inference.
 3. `train_cpsam_v2.py`
    - loads every prepared region;
-   - calls `cellpose.train.train_seg` with `test_data=None` and `test_labels=None`;
+   - for this limited-label reproduction, calls `cellpose.train.train_seg` with
+     `test_data=None` and `test_labels=None`;
    - saves the trained model, loss history, and full hyperparameter metadata.
 4. `validate_trained_model.py`
    - reloads the final model;

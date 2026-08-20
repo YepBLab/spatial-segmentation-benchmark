@@ -175,7 +175,11 @@ def main() -> int:
 
     summary = {
         "status": "PASS",
-        "training_scope": "all_regions_no_validation",
+        "training_scope": "all_regions_training_due_to_limited_manual_labels",
+        "validation_policy": "none_due_to_limited_manual_labels",
+        "recommended_validation_policy": (
+            "hold out independent regions or specimens when sufficient labels are available"
+        ),
         "channel_contract": {
             "array_axis": "CYX",
             "channel_0": "DAPI; physical morphology channel 0",
